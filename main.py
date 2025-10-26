@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal
 import random
+import urllib.parse
 
 app = FastAPI(title="DreamInk API")
 
@@ -26,10 +27,10 @@ class GenerateResponse(BaseModel):
     content: str
     mood: str
     format: str
+    image_url: str
 
 
 def craft_lines(prompt: str, mood: str, format: str) -> list[str]:
-    # Word palettes to color the output by mood
     palettes = {
         "Romantic": ["rose", "heartbeat", "velvet", "starlit", "whisper", "tender"],
         "Melancholic": ["rain", "echo", "ashen", "window", "ache", "distant"],
@@ -89,7 +90,6 @@ def craft_lines(prompt: str, mood: str, format: str) -> list[str]:
     words = palettes.get(mood, palettes["Dreamlike"])[:]
     random.shuffle(words)
 
-    # Build lines based on format structure
     tmpl = structures[format]
     lines = []
     for i, t in enumerate(tmpl):
@@ -101,16 +101,38 @@ def craft_lines(prompt: str, mood: str, format: str) -> list[str]:
         w6 = words[(i + 5) % len(words)]
         lines.append(t.format(prompt=prompt.strip(), w1=w1, w2=w2, w3=w3, w4=w4, w5=w5, w6=w6))
 
-    # Trim if necessary
     target = tone_lines[format]
     return lines[:target]
+
+
+def image_for(prompt: str, mood: str) -> str:
+    # Unsplash Source API (no key) for a thematically matched image
+    # It returns a random image for the given keywords with 1024x768 size
+    keywords = f"abstract,art,gradient,light,bokeh,{mood},{prompt}"
+    query = urllib.parse.quote(keywords)
+    return f"https://source.unsplash.com/1024x768/?{query}"
 
 
 @app.post("/generate", response_model=GenerateResponse)
 def generate_text(req: GenerateRequest):
     lines = craft_lines(req.prompt, req.mood, req.format)
     content = "\n".join(lines)
-    return GenerateResponse(content=content, mood=req.mood, format=req.format)
+    img = image_for(req.prompt, req.mood)
+    return GenerateResponse(content=content, mood=req.mood, format=req.format, image_url=img)
+
+
+class ImageRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=500)
+    mood: Literal["Romantic", "Melancholic", "Hopeful", "Dreamlike", "Haunting"]
+
+
+class ImageResponse(BaseModel):
+    image_url: str
+
+
+@app.post("/image", response_model=ImageResponse)
+def regenerate_image(req: ImageRequest):
+    return ImageResponse(image_url=image_for(req.prompt, req.mood))
 
 
 @app.get("/")
